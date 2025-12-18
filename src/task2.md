@@ -24,15 +24,23 @@
 5. Найдите книги, содержащие слово 'expert':
     ```sql
     EXPLAIN ANALYZE
-    SELECT * FROM t_books 
+    SELECT * FROM t_books
     WHERE to_tsvector('english', title) @@ to_tsquery('english', 'expert');
     ```
-    
+
     *План выполнения:*
-    [Вставьте план выполнения]
-    
+    ```
+    Bitmap Heap Scan on t_books  (cost=21.03..1336.08 rows=750 width=33) (actual time=0.069..0.070 rows=1 loops=1)
+      Recheck Cond: (to_tsvector('english'::regconfig, (title)::text) @@ '''expert'''::tsquery)
+      Heap Blocks: exact=1
+      ->  Bitmap Index Scan on t_books_fts_idx  (cost=0.00..20.84 rows=750 width=0) (actual time=0.056..0.056 rows=1 loops=1)
+            Index Cond: (to_tsvector('english'::regconfig, (title)::text) @@ '''expert'''::tsquery)
+    Planning Time: 3.506 ms
+    Execution Time: 0.207 ms
+    ```
+
     *Объясните результат:*
-    [Ваше объяснение]
+    PostgreSQL использует GIN индекс для полнотекстового поиска. GIN индекс эффективно находит документы, содержащие слово 'expert'. Найдена 1 запись - 'Expert PostgreSQL Architecture'. Использование GIN индекса делает полнотекстовый поиск очень быстрым (0.207 ms), обработан только 1 блок данных.
 
 6. Удалите индекс:
     ```sql
@@ -88,24 +96,34 @@
      EXPLAIN ANALYZE
      SELECT * FROM t_lookup WHERE item_key = '0000000455';
      ```
-     
+
      *План выполнения:*
-     [Вставьте план выполнения]
-     
+     ```
+     Index Scan using t_lookup_pk on t_lookup  (cost=0.42..8.44 rows=1 width=23) (actual time=0.214..0.214 rows=1 loops=1)
+       Index Cond: ((item_key)::text = '0000000455'::text)
+     Planning Time: 1.436 ms
+     Execution Time: 0.480 ms
+     ```
+
      *Объясните результат:*
-     [Ваше объяснение]
+     PostgreSQL использует Index Scan по первичному ключу t_lookup_pk. B-tree индекс первичного ключа эффективно находит нужную запись за одну операцию. Время выполнения 0.480 ms.
 
 14. Выполните поиск по ключу в кластеризованной таблице:
      ```sql
      EXPLAIN ANALYZE
      SELECT * FROM t_lookup_clustered WHERE item_key = '0000000455';
      ```
-     
+
      *План выполнения:*
-     [Вставьте план выполнения]
-     
+     ```
+     Index Scan using t_lookup_clustered_pkey on t_lookup_clustered  (cost=0.42..8.44 rows=1 width=23) (actual time=1.448..1.451 rows=1 loops=1)
+       Index Cond: ((item_key)::text = '0000000455'::text)
+     Planning Time: 2.536 ms
+     Execution Time: 1.495 ms
+     ```
+
      *Объясните результат:*
-     [Ваше объяснение]
+     Используется Index Scan по первичному ключу. Интересно, что время выполнения (1.495 ms) немного выше, чем у обычной таблицы (0.480 ms). Это может быть связано с кэшированием или особенностями физического расположения данных в конкретный момент выполнения запроса. Для поиска по первичному ключу кластеризация не дает преимущества, так как B-tree индекс и так эффективен.
 
 15. Создайте индекс по значению для обычной таблицы:
      ```sql
@@ -123,26 +141,44 @@
      EXPLAIN ANALYZE
      SELECT * FROM t_lookup WHERE item_value = 'T_BOOKS';
      ```
-     
+
      *План выполнения:*
-     [Вставьте план выполнения]
-     
+     ```
+     Index Scan using t_lookup_value_idx on t_lookup  (cost=0.42..8.44 rows=1 width=23) (actual time=0.171..0.171 rows=0 loops=1)
+       Index Cond: ((item_value)::text = 'T_BOOKS'::text)
+     Planning Time: 2.032 ms
+     Execution Time: 0.300 ms
+     ```
+
      *Объясните результат:*
-     [Ваше объяснение]
+     Используется Index Scan по индексу t_lookup_value_idx. Запрос выполнен быстро (0.300 ms), но запись не найдена (rows=0), так как в таблице нет значения 'T_BOOKS', все значения имеют формат 'Value_XXX'.
 
 18. Выполните поиск по значению в кластеризованной таблице:
      ```sql
      EXPLAIN ANALYZE
      SELECT * FROM t_lookup_clustered WHERE item_value = 'T_BOOKS';
      ```
-     
+
      *План выполнения:*
-     [Вставьте план выполнения]
-     
+     ```
+     Index Scan using t_lookup_clustered_value_idx on t_lookup_clustered  (cost=0.42..8.44 rows=1 width=23) (actual time=0.080..0.080 rows=0 loops=1)
+       Index Cond: ((item_value)::text = 'T_BOOKS'::text)
+     Planning Time: 0.902 ms
+     Execution Time: 0.129 ms
+     ```
+
      *Объясните результат:*
-     [Ваше объяснение]
+     Используется Index Scan по индексу t_lookup_clustered_value_idx. Время выполнения (0.129 ms) быстрее, чем у обычной таблицы (0.300 ms). Кластеризованная таблица показывает лучшую производительность благодаря более эффективному расположению данных в памяти и на диске.
 
 19. Сравните производительность поиска по значению в обычной и кластеризованной таблицах:
-     
+
      *Сравнение:*
-     [Ваше сравнение]
+     - **Обычная таблица**: Execution Time: 0.300 ms, Planning Time: 2.032 ms
+     - **Кластеризованная таблица**: Execution Time: 0.129 ms, Planning Time: 0.902 ms
+
+     **Выводы:**
+     - Кластеризованная таблица показала улучшение производительности в 2.3 раза (0.300 ms → 0.129 ms)
+     - Время планирования также сократилось более чем в 2 раза (2.032 ms → 0.902 ms)
+     - Кластеризация особенно эффективна для запросов, которые обращаются к физически близким данным
+     - Для поиска по индексированным полям (не являющимся ключом кластеризации) преимущество менее заметно, но всё равно присутствует благодаря лучшей локальности данных
+     - Основное преимущество кластеризации проявляется при последовательном чтении больших объемов данных и при range-запросах
